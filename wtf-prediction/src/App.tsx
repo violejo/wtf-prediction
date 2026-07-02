@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import SpinWheel, { SLICES } from "./SpinWheel";
+import type { SpinWheelRef } from "./SpinWheel";
 
 type Tab = "home" | "predict" | "profile";
 type Pick = "home" | "draw" | "away";
@@ -27,7 +29,8 @@ interface Profile {
 }
 
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
-const PRIZES = [50, 150, 300, 500, 1000];
+
+const SPIN_WEIGHTS = [40, 30, 18, 9, 3];
 
 function getUserId(): string {
   let id = localStorage.getItem("wtf_uid");
@@ -38,18 +41,17 @@ function getUserId(): string {
   return id;
 }
 
-function secondsToMidnightUTC(): number {
+function secsToUTCMidnight(): number {
   const now = new Date();
-  const midnight = new Date();
-  midnight.setUTCHours(24, 0, 0, 0);
-  return Math.floor((midnight.getTime() - now.getTime()) / 1000);
+  const mid = new Date();
+  mid.setUTCHours(24, 0, 0, 0);
+  return Math.floor((mid.getTime() - now.getTime()) / 1000);
 }
 
 function fmtCountdown(s: number): string {
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+    .map((n) => String(n).padStart(2, "0"))
+    .join(":");
 }
 
 function fmtDate(iso: string): string {
@@ -60,8 +62,19 @@ function fmtDate(iso: string): string {
   });
 }
 
+function pickWinIndex(): number {
+  const total = SPIN_WEIGHTS.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < SPIN_WEIGHTS.length; i++) {
+    if (r < SPIN_WEIGHTS[i]) return i;
+    r -= SPIN_WEIGHTS[i];
+  }
+  return 0;
+}
+
 export default function App() {
   const UID = useRef(getUserId());
+  const wheelRef = useRef<SpinWheelRef>(null);
   const [tab, setTab] = useState<Tab>("home");
   const [games, setGames] = useState<Game[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -71,15 +84,16 @@ export default function App() {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [spinResult, setSpinResult] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
-  const [spinAngle, setSpinAngle] = useState(0);
   const [spinErr, setSpinErr] = useState("");
   const [copied, setCopied] = useState(false);
-  const [countdown, setCountdown] = useState(secondsToMidnightUTC());
+  const [countdown, setCountdown] = useState(secsToUTCMidnight());
 
   useEffect(() => {
-    const t = setInterval(() => setCountdown(secondsToMidnightUTC()), 1000);
+    const t = setInterval(() => setCountdown(secsToUTCMidnight()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => { loadGames(); loadPreds(); }, []);
 
   async function loadGames() {
     setLoadingGames(true);
@@ -95,7 +109,7 @@ export default function App() {
     try {
       const r = await fetch(`${API}/api/predictions?userId=${UID.current}`);
       const d = await r.json();
-      setPreds(d || {});
+      if (d && typeof d === "object" && !d.error) setPreds(d);
     } catch {}
   }
 
@@ -109,7 +123,7 @@ export default function App() {
       });
       const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
       const d = await r.json();
-      setProfile(d);
+      if (!d.error) setProfile(d);
     } catch {}
     setLoadingProfile(false);
   }
@@ -136,7 +150,9 @@ export default function App() {
     setSpinning(true);
     setSpinResult(null);
     setSpinErr("");
-    setSpinAngle((a) => a + 5 * 360 + Math.floor(Math.random() * 360));
+
+    const winIndex = pickWinIndex();
+
     try {
       const r = await fetch(`${API}/api/spin`, {
         method: "POST",
@@ -144,15 +160,22 @@ export default function App() {
         body: JSON.stringify({ userId: UID.current }),
       });
       const d = await r.json();
+
+      if (d.error === "already_spun_today") {
+        setSpinErr("Already spun today. Resets at 00:00 UTC.");
+        setSpinning(false);
+        return;
+      }
+
+      wheelRef.current?.spin(winIndex);
+
       setTimeout(async () => {
-        if (d.error === "already_spun_today") {
-          setSpinErr("Already spun today. Next spin resets at 00:00 UTC.");
-        } else if (d.success) {
+        if (d.success) {
           setSpinResult(d.reward);
           await loadProfile();
         }
         setSpinning(false);
-      }, 2500);
+      }, 3400);
     } catch { setSpinning(false); }
   }
 
@@ -172,13 +195,12 @@ export default function App() {
     if (t === "profile") loadProfile();
   }
 
-  useEffect(() => { loadGames(); loadPreds(); }, []);
-
+  const liveGames = games.filter((g) => g.status === "live");
   const upcoming = games.filter((g) => g.status === "upcoming");
-  const live = games.filter((g) => g.status === "live");
-  const finished = games.filter((g) => g.status === "finished");
-  const next4 = [...live, ...upcoming].slice(0, 4);
-  const future = [...live, ...upcoming].slice(4);
+  const finished = games.filter((g) => g.status === "finished").reverse();
+  const active = [...liveGames, ...upcoming];
+  const next4 = active.slice(0, 4);
+  const future = active.slice(4);
 
   function GameCard({ g, showPicks }: { g: Game; showPicks: boolean }) {
     const myPick = preds[g.gameId];
@@ -240,52 +262,35 @@ export default function App() {
     );
     return (
       <div style={sx.list}>
-        {next4.length > 0 && (
-          <>
-            <p style={sx.section}>🔴 Coming Up</p>
-            {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
-          </>
-        )}
-        {future.length > 0 && (
-          <>
-            <p style={sx.section}>📅 Upcoming</p>
-            {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
-          </>
-        )}
-        {finished.length > 0 && (
-          <>
-            <p style={sx.section}>✅ Finished</p>
-            {finished.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
-          </>
-        )}
+        {next4.length > 0 && <>
+          <p style={sx.section}>🔴 Coming Up</p>
+          {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+        </>}
+        {future.length > 0 && <>
+          <p style={sx.section}>📅 Upcoming</p>
+          {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+        </>}
+        {finished.length > 0 && <>
+          <p style={sx.section}>✅ Finished</p>
+          {finished.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+        </>}
       </div>
     );
   }
 
   function renderPredict() {
     if (loadingGames) return <p style={sx.center}>Loading...</p>;
-    const predictable = [...live, ...upcoming];
-    if (predictable.length === 0) return (
-      <p style={sx.center}>No matches to predict right now.</p>
-    );
+    if (active.length === 0) return <p style={sx.center}>No matches to predict right now.</p>;
     return (
       <div style={sx.list}>
-        {next4.filter(g => g.status !== "finished").length > 0 && (
-          <>
-            <p style={sx.section}>🔴 Coming Up</p>
-            {next4.filter(g => g.status !== "finished").map((g) => (
-              <GameCard key={g.gameId} g={g} showPicks={true} />
-            ))}
-          </>
-        )}
-        {future.filter(g => g.status !== "finished").length > 0 && (
-          <>
-            <p style={sx.section}>📅 Upcoming</p>
-            {future.filter(g => g.status !== "finished").map((g) => (
-              <GameCard key={g.gameId} g={g} showPicks={true} />
-            ))}
-          </>
-        )}
+        {next4.length > 0 && <>
+          <p style={sx.section}>🔴 Coming Up</p>
+          {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}
+        </>}
+        {future.length > 0 && <>
+          <p style={sx.section}>📅 Upcoming</p>
+          {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}
+        </>}
       </div>
     );
   }
@@ -312,18 +317,23 @@ export default function App() {
 
         <div style={sx.box}>
           <p style={sx.boxT}>🎰 Daily Spin</p>
-          <p style={sx.boxS}>Prizes: {PRIZES.map((p) => `${p} WTF`).join(" • ")}</p>
-          <div style={sx.wheelWrap}>
-            <div style={{
-              ...sx.wheel,
-              transform: `rotate(${spinAngle}deg)`,
-              transition: spinning ? "transform 2.5s cubic-bezier(0.17,0.67,0.12,0.99)" : "none",
-            }} />
-            <div style={sx.pointer}>▼</div>
-            <div style={sx.wheelCenter}>🎯</div>
+          <div style={sx.prizeRow}>
+            {SLICES.map((sl, i) => (
+              <span key={i} style={{
+                ...sx.prizeBadge,
+                background: sl.color,
+                border: sl.value === 1000 ? "1px solid #4caf50" : "1px solid #ffffff20",
+              }}>
+                {sl.label}
+              </span>
+            ))}
           </div>
+
+          <SpinWheel ref={wheelRef} onDone={() => {}} />
+
           {spinErr && <p style={sx.err}>{spinErr}</p>}
           {spinResult && <p style={sx.ok}>🎉 You won {spinResult.toLocaleString()} WTF!</p>}
+
           <button
             style={{ ...sx.spinBtn, opacity: !profile.canSpinToday || spinning ? 0.5 : 1 }}
             disabled={!profile.canSpinToday || spinning}
@@ -331,6 +341,7 @@ export default function App() {
           >
             {spinning ? "Spinning..." : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
           </button>
+
           {!profile.canSpinToday && (
             <p style={sx.timer}>
               Next spin: <span style={{ color: "#f0c040", fontWeight: "bold" }}>{fmtCountdown(countdown)}</span> UTC
@@ -343,7 +354,7 @@ export default function App() {
           <p style={sx.boxS}>Earn 10% of daily points from everyone you invite</p>
           <div style={sx.refCode}>{profile.referralCode}</div>
           {profile.referralEarnings > 0 && (
-            <p style={{ ...sx.boxS, color: "#4caf50" }}>
+            <p style={{ ...sx.boxS, color: "#4caf50", marginBottom: 12 }}>
               💸 Earned: {profile.referralEarnings.toLocaleString()} WTF
             </p>
           )}
@@ -414,13 +425,11 @@ const sx: Record<string, React.CSSProperties> = {
   statN: { fontSize: 24, fontWeight: "bold", color: "#f0c040", margin: 0 },
   statL: { fontSize: 12, color: "#888", margin: "4px 0 0" },
   box: { background: "#1a1a2e", borderRadius: 12, padding: 16, border: "1px solid #ffffff10", textAlign: "center" },
-  boxT: { fontSize: 16, fontWeight: "bold", margin: "0 0 6px" },
+  boxT: { fontSize: 16, fontWeight: "bold", margin: "0 0 8px" },
   boxS: { fontSize: 11, color: "#888", margin: "0 0 12px" },
-  wheelWrap: { position: "relative", width: 140, height: 140, margin: "12px auto" },
-  wheel: { width: 140, height: 140, borderRadius: "50%", background: "conic-gradient(#f0c040 0% 20%,#c8860a 20% 40%,#f0c040 40% 60%,#c8860a 60% 80%,#f0c040 80% 100%)", border: "3px solid #ffffff20" },
-  pointer: { position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", color: "#fff", fontSize: 18 },
-  wheelCenter: { position: "absolute", top: "50%", left: "50%", transform: "translate(-50%,-50%)", fontSize: 24 },
-  spinBtn: { background: "linear-gradient(135deg,#f0c040,#e08c00)", border: "none", color: "#000", fontWeight: "bold", fontSize: 16, padding: "12px 32px", borderRadius: 10, cursor: "pointer", width: "100%", marginTop: 8 },
+  prizeRow: { display: "flex", justifyContent: "center", gap: 6, marginBottom: 12 },
+  prizeBadge: { fontSize: 11, fontWeight: "bold", padding: "3px 8px", borderRadius: 6, color: "#fff" },
+  spinBtn: { background: "linear-gradient(135deg,#f0c040,#e08c00)", border: "none", color: "#000", fontWeight: "bold", fontSize: 16, padding: "12px 32px", borderRadius: 10, cursor: "pointer", width: "100%", marginTop: 12 },
   err: { color: "#ff6b6b", fontSize: 12, margin: "8px 0" },
   ok: { color: "#4caf50", fontSize: 14, margin: "8px 0", fontWeight: "bold" },
   timer: { fontSize: 12, color: "#888", marginTop: 8 },
