@@ -436,4 +436,3 @@ const sx: Record<string, React.CSSProperties> = {
   refCode: { background: "#0f0f1a", border: "1px dashed #f0c040", color: "#f0c040", fontFamily: "monospace", fontSize: 20, letterSpacing: 4, padding: "10px 0", borderRadius: 8, margin: "8px 0 12px" },
   btn: { background: "#16213e", border: "1px solid #ffffff20", color: "#fff", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
 };
-bnmn
