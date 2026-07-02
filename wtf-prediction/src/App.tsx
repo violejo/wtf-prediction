@@ -24,7 +24,7 @@ interface UserProfile {
   canSpinToday: boolean;
 }
 
-const API = "https://withered-snow-677a.alinikoonahad.workers.dev/";
+const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
 const USER_ID = "test-user-1";
 const SPIN_PRIZES = [50, 150, 300, 500, 1000];
 
