@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import SpinWheel, { SLICES } from "./SpinWheel";
+import SpinWheel from "./SpinWheel";
 import type { SpinWheelRef } from "./SpinWheel";
 
 type Tab = "home" | "predict" | "profile";
-type Pick = "home" | "draw" | "away";
-type GameStatus = "upcoming" | "live" | "finished";
+type Pick = "home" | "away";
 
 interface Game {
   gameId: string;
@@ -13,7 +12,10 @@ interface Game {
   awayTeam: string;
   awayFlag: string;
   kickoff: string;
-  status: GameStatus;
+  status: "upcoming" | "live" | "finished";
+  stage: string;
+  isKnockout: boolean;
+  teamsKnown: boolean;
   resolved: boolean;
   result?: string;
 }
@@ -29,8 +31,6 @@ interface Profile {
 }
 
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
-
-const SPIN_WEIGHTS = [40, 30, 18, 9, 3];
 
 function getUserId(): string {
   let id = localStorage.getItem("wtf_uid");
@@ -62,14 +62,21 @@ function fmtDate(iso: string): string {
   });
 }
 
-function pickWinIndex(): number {
-  const total = SPIN_WEIGHTS.reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
-  for (let i = 0; i < SPIN_WEIGHTS.length; i++) {
-    if (r < SPIN_WEIGHTS[i]) return i;
-    r -= SPIN_WEIGHTS[i];
-  }
-  return 0;
+function hasStarted(kickoff: string): boolean {
+  return new Date(kickoff) <= new Date();
+}
+
+function stageLabel(stage: string): string {
+  const map: Record<string, string> = {
+    GROUP_STAGE: "Group Stage",
+    ROUND_OF_32: "Round of 32",
+    ROUND_OF_16: "Round of 16",
+    QUARTER_FINALS: "Quarter-Finals",
+    SEMI_FINALS: "Semi-Finals",
+    THIRD_PLACE: "Third Place",
+    FINAL: "Final",
+  };
+  return map[stage] || stage;
 }
 
 export default function App() {
@@ -150,9 +157,6 @@ export default function App() {
     setSpinning(true);
     setSpinResult(null);
     setSpinErr("");
-
-    const winIndex = pickWinIndex();
-
     try {
       const r = await fetch(`${API}/api/spin`, {
         method: "POST",
@@ -160,22 +164,21 @@ export default function App() {
         body: JSON.stringify({ userId: UID.current }),
       });
       const d = await r.json();
-
       if (d.error === "already_spun_today") {
         setSpinErr("Already spun today. Resets at 00:00 UTC.");
         setSpinning(false);
         return;
       }
-
-      wheelRef.current?.spin(winIndex);
-
-      setTimeout(async () => {
-        if (d.success) {
+      if (d.success) {
+        wheelRef.current?.spin(d.rewardIndex);
+        setTimeout(async () => {
           setSpinResult(d.reward);
           await loadProfile();
-        }
+          setSpinning(false);
+        }, 3400);
+      } else {
         setSpinning(false);
-      }, 3400);
+      }
     } catch { setSpinning(false); }
   }
 
@@ -195,19 +198,23 @@ export default function App() {
     if (t === "profile") loadProfile();
   }
 
-  const liveGames = games.filter((g) => g.status === "live");
-  const upcoming = games.filter((g) => g.status === "upcoming");
-  const finished = games.filter((g) => g.status === "finished").reverse();
-  const active = [...liveGames, ...upcoming];
-  const next4 = active.slice(0, 4);
-  const future = active.slice(4);
+  const now = new Date();
+  const liveGames = games.filter((g) => g.status === "live" && g.teamsKnown);
+  const upcomingGames = games.filter((g) => g.status === "upcoming" && g.teamsKnown && !hasStarted(g.kickoff));
+  const finishedGames = games.filter((g) => g.status === "finished" && g.teamsKnown).slice(-4).reverse();
+  const predictable = [...liveGames, ...upcomingGames].filter((g) => !hasStarted(g.kickoff));
+  const next4 = upcomingGames.slice(0, 4);
+  const future = upcomingGames.slice(4);
 
   function GameCard({ g, showPicks }: { g: Game; showPicks: boolean }) {
     const myPick = preds[g.gameId];
     const isLoading = submitting === g.gameId;
-    const disabled = !!myPick || g.status === "finished" || !!submitting;
+    const started = hasStarted(g.kickoff);
+    const disabled = !!myPick || started || !!submitting;
+
     return (
       <div style={sx.card}>
+        <div style={sx.stageTag}>{stageLabel(g.stage)}</div>
         <div style={sx.matchRow}>
           <div style={sx.teamL}>
             <span style={sx.flag}>{g.homeFlag}</span>
@@ -229,24 +236,31 @@ export default function App() {
             <p style={sx.loading}>⏳ Submitting...</p>
           ) : myPick ? (
             <p style={sx.picked}>
-              ✅ {myPick === "home" ? g.homeTeam : myPick === "away" ? g.awayTeam : "Draw"}
+              ✅ {myPick === "home" ? g.homeTeam : g.awayTeam}
             </p>
-          ) : g.status === "upcoming" ? (
+          ) : !started ? (
             <>
               <div style={sx.picks}>
-                <button style={sx.pickBtn} disabled={disabled} onClick={() => submitPick(g.gameId, "home")}>
+                <button style={sx.pickBtn} disabled={disabled}
+                  onClick={() => submitPick(g.gameId, "home")}>
                   {g.homeFlag} {g.homeTeam}
                 </button>
-                <button style={sx.pickBtn} disabled={disabled} onClick={() => submitPick(g.gameId, "draw")}>
-                  🤝 Draw
-                </button>
-                <button style={sx.pickBtn} disabled={disabled} onClick={() => submitPick(g.gameId, "away")}>
+                {!g.isKnockout && (
+                  <button style={{ ...sx.pickBtn, ...sx.drawBtn }} disabled={disabled}
+                    onClick={() => submitPick(g.gameId, "away")}>
+                    🤝 Draw
+                  </button>
+                )}
+                <button style={sx.pickBtn} disabled={disabled}
+                  onClick={() => submitPick(g.gameId, "away")}>
                   {g.awayFlag} {g.awayTeam}
                 </button>
               </div>
               <p style={sx.hint}>✨ Correct = 2,500 WTF</p>
             </>
-          ) : null
+          ) : (
+            <p style={{ ...sx.hint, color: "#888" }}>⏸ Match started — predictions closed</p>
+          )
         )}
       </div>
     );
@@ -262,17 +276,21 @@ export default function App() {
     );
     return (
       <div style={sx.list}>
+        {liveGames.length > 0 && <>
+          <p style={sx.section}>🔴 In Progress</p>
+          {liveGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+        </>}
         {next4.length > 0 && <>
-          <p style={sx.section}>🔴 Coming Up</p>
+          <p style={sx.section}>⏰ Coming Up</p>
           {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
         </>}
         {future.length > 0 && <>
           <p style={sx.section}>📅 Upcoming</p>
           {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
         </>}
-        {finished.length > 0 && <>
-          <p style={sx.section}>✅ Finished</p>
-          {finished.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+        {finishedGames.length > 0 && <>
+          <p style={sx.section}>✅ Recent Results</p>
+          {finishedGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
         </>}
       </div>
     );
@@ -280,17 +298,12 @@ export default function App() {
 
   function renderPredict() {
     if (loadingGames) return <p style={sx.center}>Loading...</p>;
-    if (active.length === 0) return <p style={sx.center}>No matches to predict right now.</p>;
+    if (predictable.length === 0) return (
+      <p style={sx.center}>No matches open for prediction right now.</p>
+    );
     return (
       <div style={sx.list}>
-        {next4.length > 0 && <>
-          <p style={sx.section}>🔴 Coming Up</p>
-          {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}
-        </>}
-        {future.length > 0 && <>
-          <p style={sx.section}>📅 Upcoming</p>
-          {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}
-        </>}
+        {predictable.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}
       </div>
     );
   }
@@ -317,23 +330,9 @@ export default function App() {
 
         <div style={sx.box}>
           <p style={sx.boxT}>🎰 Daily Spin</p>
-          <div style={sx.prizeRow}>
-            {SLICES.map((sl, i) => (
-              <span key={i} style={{
-                ...sx.prizeBadge,
-                background: sl.color,
-                border: sl.value === 1000 ? "1px solid #4caf50" : "1px solid #ffffff20",
-              }}>
-                {sl.label}
-              </span>
-            ))}
-          </div>
-
           <SpinWheel ref={wheelRef} onDone={() => {}} />
-
           {spinErr && <p style={sx.err}>{spinErr}</p>}
           {spinResult && <p style={sx.ok}>🎉 You won {spinResult.toLocaleString()} WTF!</p>}
-
           <button
             style={{ ...sx.spinBtn, opacity: !profile.canSpinToday || spinning ? 0.5 : 1 }}
             disabled={!profile.canSpinToday || spinning}
@@ -341,7 +340,6 @@ export default function App() {
           >
             {spinning ? "Spinning..." : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
           </button>
-
           {!profile.canSpinToday && (
             <p style={sx.timer}>
               Next spin: <span style={{ color: "#f0c040", fontWeight: "bold" }}>{fmtCountdown(countdown)}</span> UTC
@@ -404,6 +402,7 @@ const sx: Record<string, React.CSSProperties> = {
   list: { display: "flex", flexDirection: "column", gap: 12 },
   section: { color: "#f0c040", fontSize: 13, fontWeight: "bold", margin: "8px 0 4px" },
   card: { background: "#1a1a2e", borderRadius: 12, padding: "14px 16px", border: "1px solid #ffffff10" },
+  stageTag: { fontSize: 10, color: "#f0c04088", marginBottom: 6, textTransform: "uppercase", letterSpacing: 1 },
   matchRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 },
   teamL: { display: "flex", alignItems: "center", gap: 6, flex: 1 },
   teamR: { display: "flex", alignItems: "center", gap: 6, flex: 1, justifyContent: "flex-end" },
@@ -416,6 +415,7 @@ const sx: Record<string, React.CSSProperties> = {
   ft: { background: "#333", color: "#aaa", fontSize: 10, padding: "2px 6px", borderRadius: 4 },
   picks: { display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" },
   pickBtn: { flex: 1, background: "#16213e", border: "1px solid #ffffff20", color: "#fff", borderRadius: 8, padding: "8px 4px", fontSize: 11, cursor: "pointer", minWidth: 80 },
+  drawBtn: { background: "#1a2a1e", border: "1px solid #4caf5033" },
   picked: { color: "#4caf50", fontSize: 12, marginTop: 8, textAlign: "center" },
   loading: { color: "#f0c040", fontSize: 12, marginTop: 8, textAlign: "center" },
   hint: { color: "#f0c04066", fontSize: 11, marginTop: 6, textAlign: "center" },
@@ -427,8 +427,6 @@ const sx: Record<string, React.CSSProperties> = {
   box: { background: "#1a1a2e", borderRadius: 12, padding: 16, border: "1px solid #ffffff10", textAlign: "center" },
   boxT: { fontSize: 16, fontWeight: "bold", margin: "0 0 8px" },
   boxS: { fontSize: 11, color: "#888", margin: "0 0 12px" },
-  prizeRow: { display: "flex", justifyContent: "center", gap: 6, marginBottom: 12 },
-  prizeBadge: { fontSize: 11, fontWeight: "bold", padding: "3px 8px", borderRadius: 6, color: "#fff" },
   spinBtn: { background: "linear-gradient(135deg,#f0c040,#e08c00)", border: "none", color: "#000", fontWeight: "bold", fontSize: 16, padding: "12px 32px", borderRadius: 10, cursor: "pointer", width: "100%", marginTop: 12 },
   err: { color: "#ff6b6b", fontSize: 12, margin: "8px 0" },
   ok: { color: "#4caf50", fontSize: 14, margin: "8px 0", fontWeight: "bold" },
