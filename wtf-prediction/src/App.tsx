@@ -198,7 +198,6 @@ export default function App() {
     if (t === "profile") loadProfile();
   }
 
-  const now = new Date();
   const liveGames = games.filter((g) => g.status === "live" && g.teamsKnown);
   const upcomingGames = games.filter((g) => g.status === "upcoming" && g.teamsKnown && !hasStarted(g.kickoff));
   const finishedGames = games.filter((g) => g.status === "finished" && g.teamsKnown).slice(-4).reverse();
