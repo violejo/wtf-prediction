@@ -247,7 +247,7 @@ export default function App() {
                 {!g.isKnockout && (
                   <button style={{ ...sx.pickBtn, ...sx.drawBtn }} disabled={disabled}
                     onClick={() => submitPick(g.gameId, "away")}>
-                    🤝 Draw
+                    🤝 Random
                   </button>
                 )}
                 <button style={sx.pickBtn} disabled={disabled}
