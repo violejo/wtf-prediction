@@ -67,7 +67,6 @@ const CONTRACT_ABI = [
 
 const NEON_CYAN = "#00f5ff";
 const NEON_PURPLE = "#bf00ff";
-const NEON_GREEN = "#00ff9f";
 const NEON_PINK = "#ff006e";
 const BG_DARK = "#050510";
 const BG_CARD = "#0a0a1a";
