@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 // ==========================================
-// 1. BracketView Component (Inline)
+// 1. BracketView Component (Inline Fix for TS2307)
 // ==========================================
 interface BracketViewProps {
   title?: string;
@@ -12,7 +12,6 @@ const BracketView: React.FC<BracketViewProps> = ({ title = "Predictions Bracket"
     <div className="p-4 my-4 bg-gray-800 text-white rounded-lg border border-gray-700">
       <h3 className="text-lg font-bold mb-2">{title}</h3>
       <p className="text-sm text-gray-400">Farcaster Frame / Mini-App Bracket View</p>
-      {/* Design and structure your predictions tree here */}
       <div className="mt-2 p-2 bg-gray-900 rounded text-center text-xs text-gray-500">
         [Predictions bracket tree layout renders here]
       </div>
@@ -21,7 +20,7 @@ const BracketView: React.FC<BracketViewProps> = ({ title = "Predictions Bracket"
 };
 
 // ==========================================
-// 2. Main App Component (Farcaster Optimized)
+// 2. Main App Component (MetaMask Removed & Cleaned)
 // ==========================================
 function App() {
   const [userContext, setUserContext] = useState<any>(null);
@@ -30,9 +29,8 @@ function App() {
   useEffect(() => {
     const initFarcaster = async () => {
       try {
-        // Initialize connection with Farcaster client without MetaMask dependency
         if (typeof window !== 'undefined') {
-          // Example of fetching context using the latest @farcaster/frame-sdk:
+          // Farcaster SDK integration point
           // const sdk = await import('@farcaster/frame-sdk');
           // const context = await sdk.actions.ready();
           // setUserContext(context);
@@ -77,7 +75,6 @@ function App() {
           </div>
         )}
 
-        {/* Inline component rendered directly without any external file dependency */}
         <BracketView title="WTF Tournament Bracket" />
 
         <div className="mt-6 text-center">
