@@ -46,6 +46,7 @@ interface Profile {
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
 
 const KNOCKOUT_STAGES = [
+  { key: "LAST_16", label: "Round of 16", points: 500 },
   { key: "ROUND_OF_16", label: "Round of 16", points: 500 },
   { key: "QUARTER_FINALS", label: "Quarter-Finals", points: 500 },
   { key: "SEMI_FINALS", label: "Semi-Finals", points: 500 },
