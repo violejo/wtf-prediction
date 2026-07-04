@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import SpinWheel from "./SpinWheel";
 import type { SpinWheelRef } from "./SpinWheel";
 
