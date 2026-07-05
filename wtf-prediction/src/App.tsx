@@ -107,7 +107,7 @@ function pickLabel(pick: string, home: string, away: string): string {
 
 export default function App() {
   const UID = useRef(getUserId());
-  const [fcUser, setFcUser] = useState<{ fid: number; username?: string } | null>(null);
+  const [, setFcUser] = useState<{ fid: number; username?: string } | null>(null);
   const wheelRef = useRef<SpinWheelRef>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tab, setTab] = useState<Tab>("home");
