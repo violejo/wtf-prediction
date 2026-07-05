@@ -2,7 +2,11 @@ import { useState, useEffect, useRef } from "react";
 import SpinWheel from "./SpinWheel";
 import BracketView from "./BracketView";
 import type { SpinWheelRef } from "./SpinWheel";
-
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+}
 type Tab = "home" | "predict" | "bracket" | "profile";
 type Pick = "home" | "draw" | "away";
 
@@ -48,7 +52,7 @@ const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
 const CONTRACT_ADDRESS = "0x780DF9609F84e16Dc75f4c36D30855F01d91941F";
 const BASE_CHAIN_ID = "0x2105";
 
-const CONTRACT_ABI = [
+
   {
     inputs: [{ internalType: "string", name: "gameId", type: "string" }, { internalType: "string", name: "pick", type: "string" }],
     name: "recordPrediction",
