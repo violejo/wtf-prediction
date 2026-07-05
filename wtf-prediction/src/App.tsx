@@ -2,11 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import SpinWheel from "./SpinWheel";
 import BracketView from "./BracketView";
 import type { SpinWheelRef } from "./SpinWheel";
-declare global {
-  interface Window {
-    ethereum?: any;
-  }
-}
+
 type Tab = "home" | "predict" | "bracket" | "profile";
 type Pick = "home" | "draw" | "away";
 
@@ -39,6 +35,7 @@ interface PredEntry {
 
 interface Profile {
   userId: string;
+  walletAddress: string | null;
   wtf: number;
   rank: number;
   rankType: string;
@@ -49,28 +46,10 @@ interface Profile {
 }
 
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
-const CONTRACT_ADDRESS = "0x780DF9609F84e16Dc75f4c36D30855F01d91941F";
-const BASE_CHAIN_ID = "0x2105";
-
-
-  {
-    inputs: [{ internalType: "string", name: "gameId", type: "string" }, { internalType: "string", name: "pick", type: "string" }],
-    name: "recordPrediction",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [],
-    name: "recordSpin",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-];
 
 const NEON_CYAN = "#00f5ff";
 const NEON_PURPLE = "#bf00ff";
+const NEON_GREEN = "#00ff9f";
 const NEON_PINK = "#ff006e";
 const BG_DARK = "#050510";
 const BG_CARD = "#0a0a1a";
@@ -83,10 +62,6 @@ function getUserId(): string {
     localStorage.setItem("wtf_uid", id);
   }
   return id;
-}
-
-function getStoredWallet(): string | null {
-  return localStorage.getItem("wtf_wallet");
 }
 
 function secsToUTCMidnight(): number {
@@ -129,75 +104,6 @@ function pickLabel(pick: string, home: string, away: string): string {
   return "Draw";
 }
 
-async function ensureBaseNetwork(): Promise<boolean> {
-  if (!window.ethereum) return false;
-  try {
-    const chainId = await window.ethereum.request({ method: "eth_chainId" });
-    if (chainId !== BASE_CHAIN_ID) {
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: BASE_CHAIN_ID }],
-      });
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function sendContractTx(fnName: string, args: string[]): Promise<string | null> {
-  if (!window.ethereum) return null;
-  try {
-    const ok = await ensureBaseNetwork();
-    if (!ok) return null;
-
-    const accounts: string[] = await window.ethereum.request({ method: "eth_requestAccounts" });
-    if (!accounts.length) return null;
-
-    const wallet = accounts[0];
-    localStorage.setItem("wtf_wallet", wallet);
-
-    const iface = fnName === "recordPrediction"
-      ? "0x" + encodeRecordPrediction(args[0], args[1])
-      : "0x" + encodeRecordSpin();
-
-    const txHash = await window.ethereum.request({
-      method: "eth_sendTransaction",
-      params: [{
-        from: wallet,
-        to: CONTRACT_ADDRESS,
-        data: iface,
-        gas: "0x15F90",
-      }],
-    });
-
-    return txHash;
-  } catch {
-    return null;
-  }
-}
-
-function encodeString(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
-  const lenHex = bytes.length.toString(16).padStart(64, "0");
-  const padded = hex.padEnd(Math.ceil(hex.length / 64) * 64, "0");
-  return lenHex + padded;
-}
-
-function encodeRecordPrediction(gameId: string, pick: string): string {
-  const selector = "a2e3b7c4";
-  const offset1 = "0000000000000000000000000000000000000000000000000000000000000040";
-  const gameIdEncoded = encodeString(gameId);
-  const offset2 = (64 + 32 + Math.ceil(gameIdEncoded.length / 64) * 32).toString(16).padStart(64, "0");
-  const pickEncoded = encodeString(pick);
-  return selector + offset1 + offset2 + gameIdEncoded + pickEncoded;
-}
-
-function encodeRecordSpin(): string {
-  return "e8d98b2e";
-}
-
 export default function App() {
   const UID = useRef(getUserId());
   const wheelRef = useRef<SpinWheelRef>(null);
@@ -217,15 +123,16 @@ export default function App() {
   const [countdown, setCountdown] = useState(secsToUTCMidnight());
   const [showPredHistory, setShowPredHistory] = useState(false);
   const [animatedCards, setAnimatedCards] = useState<Set<string>>(new Set());
-  const [wallet, setWallet] = useState<string | null>(getStoredWallet());
-  const [txPending, setTxPending] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setCountdown(secsToUTCMidnight()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => { loadGames(); loadPreds(); }, []);
+  useEffect(() => {
+    loadGames();
+    loadPreds();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -264,25 +171,6 @@ export default function App() {
     draw();
     return () => cancelAnimationFrame(raf);
   }, []);
-
-  async function connectWallet(): Promise<string | null> {
-    if (!window.ethereum) return null;
-    try {
-      const accounts: string[] = await window.ethereum.request({ method: "eth_requestAccounts" });
-      if (accounts.length) {
-        const w = accounts[0];
-        localStorage.setItem("wtf_wallet", w);
-        setWallet(w);
-        await fetch(`${API}/api/user`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: UID.current, walletAddress: w }),
-        });
-        return w;
-      }
-    } catch {}
-    return null;
-  }
 
   async function loadGames() {
     setLoadingGames(true);
@@ -332,17 +220,6 @@ export default function App() {
   async function submitPick(gameId: string, pick: Pick) {
     if (submitting) return;
     setSubmitting(gameId);
-
-    let w = wallet;
-    if (!w) w = await connectWallet();
-
-    if (w) {
-      setTxPending(true);
-      const pickStr = pick === "home" ? "home" : pick === "away" ? "away" : "draw";
-      await sendContractTx("recordPrediction", [gameId, pickStr]);
-      setTxPending(false);
-    }
-
     try {
       const r = await fetch(`${API}/api/predict`, {
         method: "POST",
@@ -380,16 +257,6 @@ export default function App() {
     setSpinning(true);
     setSpinResult(null);
     setSpinErr("");
-
-    let w = wallet;
-    if (!w) w = await connectWallet();
-
-    if (w) {
-      setTxPending(true);
-      await sendContractTx("recordSpin", []);
-      setTxPending(false);
-    }
-
     try {
       const r = await fetch(`${API}/api/spin`, {
         method: "POST",
@@ -409,8 +276,12 @@ export default function App() {
           await loadProfile();
           setSpinning(false);
         }, 3400);
-      } else { setSpinning(false); }
-    } catch { setSpinning(false); }
+      } else {
+        setSpinning(false);
+      }
+    } catch {
+      setSpinning(false);
+    }
   }
 
   function copyLink() {
@@ -437,21 +308,6 @@ export default function App() {
   const predictable = upcomingGames.filter((g) => !hasStarted(g.kickoff));
   const next4 = upcomingGames.slice(0, 4);
   const future = upcomingGames.slice(4);
-
-  function WalletBar() {
-    if (wallet) return (
-      <div style={sx.walletBar}>
-        <span style={sx.walletDot} />
-        <span style={sx.walletAddr}>{wallet.slice(0, 6)}...{wallet.slice(-4)}</span>
-        <span style={{ color: "#333", fontSize: 9 }}>Base</span>
-      </div>
-    );
-    return (
-      <button style={sx.connectBtn} onClick={connectWallet}>
-        🔗 Connect Wallet
-      </button>
-    );
-  }
 
   function GameCard({ g, showPicks }: { g: Game; showPicks: boolean }) {
     const myPick = preds[g.gameId];
@@ -480,9 +336,7 @@ export default function App() {
         <p style={sx.time}>🕐 {fmtDate(g.kickoff)}</p>
         {showPicks && (
           isLoading ? (
-            <p style={sx.loading}>
-              {txPending ? "⛓ Confirming on Base..." : "⏳ Submitting..."}
-            </p>
+            <p style={sx.loading}>⏳ Submitting...</p>
           ) : myPick ? (
             <p style={sx.picked}>✅ {pickLabel(myPick, g.homeTeam, g.awayTeam)}</p>
           ) : !started ? (
@@ -504,9 +358,11 @@ export default function App() {
                   {g.awayFlag} {g.awayTeam}
                 </button>
               </div>
-              <p style={sx.hint}>✨ Correct = 2,500 WTF · ⛓ Recorded on Base</p>
+              <p style={sx.hint}>✨ Correct = 2,500 WTF</p>
             </>
-          ) : <p style={{ ...sx.hint, color: "#444" }}>⏸ Predictions closed</p>
+          ) : (
+            <p style={{ ...sx.hint, color: "#444" }}>⏸ Predictions closed</p>
+          )
         )}
       </div>
     );
@@ -514,18 +370,40 @@ export default function App() {
 
   function renderHome() {
     if (loadingGames) return <p style={sx.center}>Loading matches...</p>;
-    if (games.length === 0) return (
-      <div style={sx.center}>
-        <p style={{ color: "#444", marginBottom: 16 }}>No matches available</p>
-        <button style={sx.btn} onClick={loadGames}>Reload</button>
-      </div>
-    );
+    if (games.length === 0) {
+      return (
+        <div style={sx.center}>
+          <p style={{ color: "#444", marginBottom: 16 }}>No matches available</p>
+          <button style={sx.btn} onClick={loadGames}>Reload</button>
+        </div>
+      );
+    }
     return (
       <div style={sx.list}>
-        {liveGames.length > 0 && <><p style={sx.section}>🔴 IN PROGRESS</p>{liveGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}</>}
-        {next4.length > 0 && <><p style={sx.section}>⚡ COMING UP</p>{next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}</>}
-        {future.length > 0 && <><p style={sx.section}>📅 UPCOMING</p>{future.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}</>}
-        {finishedGames.length > 0 && <><p style={sx.section}>✅ RECENT RESULTS</p>{finishedGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}</>}
+        {liveGames.length > 0 && (
+          <>
+            <p style={sx.section}>🔴 IN PROGRESS</p>
+            {liveGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+          </>
+        )}
+        {next4.length > 0 && (
+          <>
+            <p style={sx.section}>⚡ COMING UP</p>
+            {next4.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+          </>
+        )}
+        {future.length > 0 && (
+          <>
+            <p style={sx.section}>📅 UPCOMING</p>
+            {future.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+          </>
+        )}
+        {finishedGames.length > 0 && (
+          <>
+            <p style={sx.section}>✅ RECENT RESULTS</p>
+            {finishedGames.map((g) => <GameCard key={g.gameId} g={g} showPicks={false} />)}
+          </>
+        )}
       </div>
     );
   }
@@ -543,14 +421,17 @@ export default function App() {
 
   function renderProfile() {
     if (loadingProfile) return <p style={sx.center}>Loading...</p>;
-    if (!profile) return (
-      <div style={sx.center}><button style={sx.btn} onClick={loadProfile}>Load Profile</button></div>
-    );
+    if (!profile) {
+      return (
+        <div style={sx.center}>
+          <button style={sx.btn} onClick={loadProfile}>Load Profile</button>
+        </div>
+      );
+    }
     const correct = profile.predHistory.filter((p) => p.outcome === "correct").length;
     const total = profile.predHistory.filter((p) => p.outcome !== "pending").length;
     return (
       <div style={sx.profileWrap}>
-        <WalletBar />
         <div style={sx.statsRow}>
           <div style={sx.stat}>
             <p style={sx.statN}>{profile.wtf.toLocaleString()}</p>
@@ -571,11 +452,17 @@ export default function App() {
           <SpinWheel ref={wheelRef} onDone={() => {}} />
           {spinErr && <p style={sx.err}>{spinErr}</p>}
           {spinResult && <p style={sx.ok}>🎉 You won {spinResult.toLocaleString()} WTF!</p>}
-          <button style={{ ...sx.spinBtn, opacity: !profile.canSpinToday || spinning ? 0.4 : 1 }} disabled={!profile.canSpinToday || spinning} onClick={doSpin}>
-            {spinning ? (txPending ? "⛓ Confirming..." : "Spinning...") : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
+          <button
+            style={{ ...sx.spinBtn, opacity: !profile.canSpinToday || spinning ? 0.4 : 1 }}
+            disabled={!profile.canSpinToday || spinning}
+            onClick={doSpin}
+          >
+            {spinning ? "Spinning..." : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
           </button>
           {!profile.canSpinToday && (
-            <p style={sx.timer}>Next spin: <span style={{ color: NEON_CYAN, fontWeight: "bold", fontFamily: "monospace" }}>{fmtCountdown(countdown)}</span> UTC</p>
+            <p style={sx.timer}>
+              Next spin: <span style={{ color: NEON_CYAN, fontWeight: "bold", fontFamily: "monospace" }}>{fmtCountdown(countdown)}</span> UTC
+            </p>
           )}
         </div>
         {profile.predHistory.length > 0 && (
@@ -593,7 +480,9 @@ export default function App() {
                       <span>{p.awayTeam} {p.awayFlag}</span>
                     </div>
                     <div style={sx.predMeta}>
-                      <span style={{ color: "#666", fontSize: 11 }}>Pick: <span style={{ color: NEON_CYAN }}>{pickLabel(p.pick, p.homeTeam, p.awayTeam)}</span></span>
+                      <span style={{ color: "#666", fontSize: 11 }}>
+                        Pick: <span style={{ color: NEON_CYAN }}>{pickLabel(p.pick, p.homeTeam, p.awayTeam)}</span>
+                      </span>
                       {p.outcome === "correct" && <span style={{ color: NEON_GREEN, fontSize: 11 }}>✅ +2,500</span>}
                       {p.outcome === "wrong" && <span style={{ color: NEON_PINK, fontSize: 11 }}>❌ Wrong</span>}
                       {p.outcome === "pending" && <span style={{ color: "#444", fontSize: 11 }}>⏳ Pending</span>}
@@ -609,7 +498,9 @@ export default function App() {
           <p style={sx.boxS}>Earn 10% of daily points from everyone you invite</p>
           <div style={sx.refCode}>{profile.referralCode}</div>
           {profile.referralEarnings > 0 && (
-            <p style={{ ...sx.boxS, color: NEON_GREEN, marginBottom: 12 }}>💸 Earned: {profile.referralEarnings.toLocaleString()} WTF</p>
+            <p style={{ ...sx.boxS, color: NEON_GREEN, marginBottom: 12 }}>
+              💸 Earned: {profile.referralEarnings.toLocaleString()} WTF
+            </p>
           )}
           <button style={sx.btn} onClick={copyLink}>{copied ? "✅ Copied!" : "📋 Copy Invite Link"}</button>
         </div>
@@ -643,7 +534,8 @@ export default function App() {
           { key: "profile", icon: "👤", label: "Profile" },
         ] as { key: Tab; icon: string; label: string }[]).map((t) => (
           <button key={t.key} style={{ ...sx.navBtn, ...(tab === t.key ? sx.navOn : {}) }} onClick={() => switchTab(t.key)}>
-            {t.icon}<br /><span style={sx.navL}>{t.label}</span>
+            {t.icon}<br />
+            <span style={sx.navL}>{t.label}</span>
           </button>
         ))}
       </div>
@@ -686,10 +578,6 @@ const sx: Record<string, React.CSSProperties> = {
   picked: { color: NEON_GREEN, fontSize: 12, marginTop: 8, textAlign: "center", textShadow: `0 0 8px ${NEON_GREEN}` },
   loading: { color: NEON_CYAN, fontSize: 12, marginTop: 8, textAlign: "center" },
   hint: { color: "#333", fontSize: 10, marginTop: 6, textAlign: "center" },
-  walletBar: { background: BG_CARD, borderRadius: 10, padding: "8px 14px", border: `1px solid ${NEON_GREEN}22`, display: "flex", alignItems: "center", gap: 8 },
-  walletDot: { width: 6, height: 6, borderRadius: "50%", background: NEON_GREEN, boxShadow: `0 0 6px ${NEON_GREEN}`, flexShrink: 0 },
-  walletAddr: { color: NEON_GREEN, fontFamily: "monospace", fontSize: 12, flex: 1 },
-  connectBtn: { background: BG_CARD, border: `1px solid ${NEON_CYAN}33`, color: NEON_CYAN, borderRadius: 10, padding: "10px 16px", cursor: "pointer", fontSize: 13, width: "100%", textShadow: `0 0 8px ${NEON_CYAN}` },
   profileWrap: { display: "flex", flexDirection: "column", gap: 16 },
   statsRow: { display: "flex", gap: 12 },
   stat: { flex: 1, background: BG_CARD, borderRadius: 12, padding: 16, textAlign: "center", border: `1px solid ${NEON_CYAN}18` },
