@@ -9,7 +9,7 @@
     "name": "WTF Token",
     "iconUrl": "https://wtf-prediction.pages.dev/icon.png",
     "homeUrl": "https://wtf-prediction.pages.dev",
-    "imageUrl": "https://wtf-prediction.pages.dev/og.png",
+    "iconUrl": "https://wtf-prediction.pages.dev/icon.png",
     "buttonTitle": "🎯 Predict Now",
     "splashImageUrl": "https://wtf-prediction.pages.dev/splash.png",
     "splashBackgroundColor": "#050510"
