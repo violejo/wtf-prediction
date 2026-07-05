@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import SpinWheel from "./SpinWheel";
 import BracketView from "./BracketView";
 import type { SpinWheelRef } from "./SpinWheel";
+// ۱. ایمپورت کردن SDK بومی فارکستر
+import { sdk } from "@farcaster/frame-sdk";
 
 type Tab = "home" | "predict" | "bracket" | "profile";
 type Pick = "home" | "draw" | "away";
@@ -123,6 +125,36 @@ export default function App() {
   const [countdown, setCountdown] = useState(secsToUTCMidnight());
   const [showPredHistory, setShowPredHistory] = useState(false);
   const [animatedCards, setAnimatedCards] = useState<Set<string>>(new Set());
+
+  // استیت‌های جدید فارکستر
+  const [isFrame, setIsFrame] = useState(false);
+  const [farcasterUser, setFarcasterUser] = useState<any>(null);
+  const [connectingWallet, setConnectingWallet] = useState(false);
+
+  // ۲. اینیشیالایز کردن بومی SDK فارکستر و خواندن هویت کاربر
+  useEffect(() => {
+    const initFarcaster = async () => {
+      try {
+        const context = await sdk.context;
+        if (context && context.user) {
+          setFarcasterUser(context.user);
+          setIsFrame(true);
+          // تنظیم شناسه کاربر بر اساس FID فارکستر به جای حافظه محلی متفرقه
+          UID.current = String(context.user.fid);
+          
+          // آپدیت مجدد پیش‌بینی‌ها پس از ست شدن اکانت واقعی
+          loadPreds();
+          if (tab === "profile") loadProfile();
+        }
+      } catch (e) {
+        console.log("خارج از کلاینت فارکستر اجرا شده است.");
+      } finally {
+        // اعلام آمادگی فریم برای رندر به کلاینت وارپ‌کست
+        sdk.actions.ready();
+      }
+    };
+    initFarcaster();
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setCountdown(secsToUTCMidnight()), 1000);
@@ -254,6 +286,10 @@ export default function App() {
 
   async function doSpin() {
     if (spinning || !profile?.canSpinToday) return;
+    setRunningSpin();
+  }
+
+  async function setRunningSpin() {
     setSpinning(true);
     setSpinResult(null);
     setSpinErr("");
@@ -281,6 +317,49 @@ export default function App() {
       }
     } catch {
       setSpinning(false);
+    }
+  }
+
+  // ۳. متد بومی اتصال به والت داخلی فارکستر (Warpcast Wallet Provider)
+  async function connectFarcasterWallet() {
+    if (connectingWallet) return;
+    setConnectingWallet(true);
+    try {
+      const provider = sdk.wallet.ethProvider;
+      const accounts = (await provider.request({
+        method: "eth_requestAccounts",
+      })) as string[];
+      
+      if (accounts && accounts.length > 0) {
+        const wallet = accounts[0];
+        
+        // ارسال آدرس ولت متصل شده به ورکر جهت ثبت نهایی در دیتابیس پروفایل کاربر
+        await fetch(`${API}/api/user`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: UID.current, walletAddress: wallet }),
+        });
+        
+        await loadProfile();
+      }
+    } catch (err) {
+      console.error("اتصال به کیف پول وارپ‌کست ناموفق بود:", err);
+    } finally {
+      setConnectingWallet(false);
+    }
+  }
+
+  // ۴. ساختن لینک هوشمند اینتنت رفرال اختصاصی برای انتشار مستقیم در کست فید
+  function shareOnFarcaster() {
+    if (!profile) return;
+    const refUrl = `https://wtf-prediction.pages.dev?ref=${profile.referralCode}`;
+    const text = "🎯 I'm predicting World Cup matches and earning WTF points! Join my bracket now: \n\n";
+    const warpcastIntent = `https://warpcast.com/~/compose?text=${encodeURIComponent(text)}&embeds[]=${encodeURIComponent(refUrl)}`;
+    
+    if (isFrame) {
+      sdk.actions.openUrl(warpcastIntent);
+    } else {
+      window.open(warpcastIntent, "_blank");
     }
   }
 
@@ -419,8 +498,9 @@ export default function App() {
     return <BracketView games={games} bracket={bracket} onPick={handleBracketPick} />;
   }
 
+  // اضافه شدن المان بومی والت و دکمه اشتراک‌گذاری فارکستر
   function renderProfile() {
-    if (loadingProfile) return <p style={sx.center}>Loading...</p>;
+    if (loadingProfile) return <p style={sx.center}>Loading Profile...</p>;
     if (!profile) {
       return (
         <div style={sx.center}>
@@ -432,6 +512,13 @@ export default function App() {
     const total = profile.predHistory.filter((p) => p.outcome !== "pending").length;
     return (
       <div style={sx.profileWrap}>
+        {/* نمایش نام کاربری فارکستر در صورت وجود */}
+        {farcasterUser && (
+          <div style={sx.userBadge}>
+            <span>👤 Farcaster: <b>@{farcasterUser.username}</b></span>
+          </div>
+        )}
+
         <div style={sx.statsRow}>
           <div style={sx.stat}>
             <p style={sx.statN}>{profile.wtf.toLocaleString()}</p>
@@ -442,6 +529,21 @@ export default function App() {
             <p style={sx.statL}>🏆 Rank</p>
           </div>
         </div>
+
+        {/* بخش متصل کردن والت داخلی وارپ‌کست */}
+        <div style={sx.box}>
+          <p style={sx.boxT}>🛡️ Web3 Account Wallet</p>
+          {profile.walletAddress ? (
+            <p style={{ ...sx.ok, fontSize: 12, fontFamily: "monospace" }}>
+              🔗 Connected: {profile.walletAddress.slice(0, 6)}...{profile.walletAddress.slice(-4)}
+            </p>
+          ) : (
+            <button style={sx.walletBtn} onClick={connectFarcasterWallet}>
+              {connectingWallet ? "Connecting..." : "🔌 Connect Warpcast Wallet"}
+            </button>
+          )}
+        </div>
+
         {total > 0 && (
           <div style={sx.accuracyBox}>
             <span style={sx.accuracyText}>🎯 Accuracy: {correct}/{total} ({Math.round((correct / total) * 100)}%)</span>
@@ -494,7 +596,7 @@ export default function App() {
           </div>
         )}
         <div style={sx.box}>
-          <p style={sx.boxT}>🔗 Referral</p>
+          <p style={sx.boxT}>🔗 Referral Program</p>
           <p style={sx.boxS}>Earn 10% of daily points from everyone you invite</p>
           <div style={sx.refCode}>{profile.referralCode}</div>
           {profile.referralEarnings > 0 && (
@@ -502,7 +604,10 @@ export default function App() {
               💸 Earned: {profile.referralEarnings.toLocaleString()} WTF
             </p>
           )}
-          <button style={sx.btn} onClick={copyLink}>{copied ? "✅ Copied!" : "📋 Copy Invite Link"}</button>
+          <div style={{ display: "flex", gap: 8, flexDirection: "column" }}>
+            <button style={sx.farcasterBtn} onClick={shareOnFarcaster}>📢 Share on Farcaster Feed</button>
+            <button style={sx.btn} onClick={copyLink}>{copied ? "✅ Copied!" : "📋 Copy Link Instead"}</button>
+          </div>
         </div>
       </div>
     );
@@ -593,9 +698,12 @@ const sx: Record<string, React.CSSProperties> = {
   predTeams: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#888" },
   predMeta: { display: "flex", justifyContent: "space-between", alignItems: "center" },
   spinBtn: { background: `linear-gradient(135deg, ${NEON_CYAN}, ${NEON_PURPLE})`, border: "none", color: "#000", fontWeight: "bold", fontSize: 15, padding: "12px 32px", borderRadius: 10, cursor: "pointer", width: "100%", marginTop: 12, boxShadow: `0 0 20px ${NEON_CYAN}33` },
+  walletBtn: { background: "none", border: `1px solid ${NEON_GREEN}`, color: NEON_GREEN, fontWeight: "bold", fontSize: 13, padding: "10px 20px", borderRadius: 8, cursor: "pointer", width: "100%" },
+  farcasterBtn: { background: "#7c3aed", border: "none", color: "#fff", fontWeight: "bold", fontSize: 14, padding: "12px 20px", borderRadius: 8, cursor: "pointer", width: "100%", boxShadow: `0 0 12px #7c3aed44` },
+  userBadge: { background: BG_CARD, border: `1px solid ${NEON_PURPLE}33`, color: "#b0b0d0", fontSize: 13, padding: "8px 14px", borderRadius: 10, display: "flex", alignItems: "center", gap: 6 },
   err: { color: NEON_PINK, fontSize: 12, margin: "8px 0" },
   ok: { color: NEON_GREEN, fontSize: 14, margin: "8px 0", fontWeight: "bold", textShadow: `0 0 8px ${NEON_GREEN}` },
   timer: { fontSize: 12, color: "#444", marginTop: 8 },
   refCode: { background: BG_DARK, border: `1px dashed ${NEON_CYAN}44`, color: NEON_CYAN, fontFamily: "monospace", fontSize: 18, letterSpacing: 4, padding: "10px 0", borderRadius: 8, margin: "8px 0 12px", textShadow: `0 0 8px ${NEON_CYAN}` },
-  btn: { background: BG_CARD2, border: `1px solid ${NEON_CYAN}22`, color: "#777", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13 },
+  btn: { background: BG_CARD2, border: `1px solid ${NEON_CYAN}22`, color: "#777", padding: "10px 20px", borderRadius: 8, cursor: "pointer", fontSize: 13, width: "100%" },
 };
