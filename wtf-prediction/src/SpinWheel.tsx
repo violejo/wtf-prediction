@@ -1,4 +1,4 @@
-import { useRef, useState, useImperativeHandle, forwardRef } from "react";
+import { useState, useImperativeHandle, forwardRef } from "react";
 
 const SLICES = [
   { value: 50, color: "#1a1a1a", label: "50" },
@@ -34,7 +34,7 @@ interface Props {
 const SpinWheel = forwardRef<SpinWheelRef, Props>(({ onDone }, ref) => {
   const [angle, setAngle] = useState(0);
   const [spinning, setSpinning] = useState(false);
-  const currentAngle = useRef(0);
+  const [currentAngle, setCurrentAngle] = useState(0);
   const SIZE = 220;
   const CX = SIZE / 2;
   const CY = SIZE / 2;
@@ -47,9 +47,9 @@ const SpinWheel = forwardRef<SpinWheelRef, Props>(({ onDone }, ref) => {
 
       const sliceCenter = winIndex * DEG + DEG / 2;
       const target = 360 - sliceCenter;
-      const extra = 5 * 360 + target - (currentAngle.current % 360);
-      const newAngle = currentAngle.current + extra;
-      currentAngle.current = newAngle;
+      const extra = 5 * 360 + target - (currentAngle % 360);
+      const newAngle = currentAngle + extra;
+      setCurrentAngle(newAngle);
       setAngle(newAngle);
 
       setTimeout(() => {
@@ -66,9 +66,7 @@ const SpinWheel = forwardRef<SpinWheelRef, Props>(({ onDone }, ref) => {
         height={SIZE}
         style={{
           transform: `rotate(${angle}deg)`,
-          transition: spinning
-            ? "transform 3.2s cubic-bezier(0.17,0.67,0.08,1)"
-            : "none",
+          transition: spinning ? "transform 3.2s cubic-bezier(0.17,0.67,0.08,1)" : "none",
           borderRadius: "50%",
           boxShadow: "0 0 24px #00000088",
         }}
@@ -80,18 +78,11 @@ const SpinWheel = forwardRef<SpinWheelRef, Props>(({ onDone }, ref) => {
           const textPos = polarToCart(CX, CY, R * 0.65, mid);
           return (
             <g key={i}>
-              <path
-                d={slicePath(CX, CY, R, start, end)}
-                fill={sl.color}
-                stroke="#ffffff22"
-                strokeWidth={1.5}
-              />
+              <path d={slicePath(CX, CY, R, start, end)} fill={sl.color} stroke="#ffffff22" strokeWidth={1.5} />
               <text
-                x={textPos.x}
-                y={textPos.y}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill={sl.color === "#1a7a1a" ? "#fff" : "#fff"}
+                x={textPos.x} y={textPos.y}
+                textAnchor="middle" dominantBaseline="middle"
+                fill="#fff"
                 fontSize={sl.value === 1000 ? 13 : 14}
                 fontWeight="bold"
                 fontFamily="Inter,Arial,sans-serif"
@@ -103,30 +94,13 @@ const SpinWheel = forwardRef<SpinWheelRef, Props>(({ onDone }, ref) => {
           );
         })}
         <circle cx={CX} cy={CY} r={18} fill="#0f0f1a" stroke="#f0c040" strokeWidth={2} />
-        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="middle" fontSize={14}>
-          🎯
-        </text>
+        <text x={CX} y={CY} textAnchor="middle" dominantBaseline="middle" fontSize={14}>🎯</text>
       </svg>
 
-      <div style={{
-        position: "absolute",
-        top: -14,
-        left: "50%",
-        transform: "translateX(-50%)",
-        fontSize: 22,
-        filter: "drop-shadow(0 2px 4px #000)",
-        zIndex: 10,
-      }}>
+      <div style={{ position: "absolute", top: -14, left: "50%", transform: "translateX(-50%)", fontSize: 22, filter: "drop-shadow(0 2px 4px #000)", zIndex: 10 }}>
         ▼
       </div>
-
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        borderRadius: "50%",
-        border: "3px solid #f0c04055",
-        pointerEvents: "none",
-      }} />
+      <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid #f0c04055", pointerEvents: "none" }} />
     </div>
   );
 });
