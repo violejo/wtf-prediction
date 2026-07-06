@@ -247,11 +247,8 @@ export default function App() {
   function shareReferral() {
     if (!profile) return;
     const link = "https://wtf-prediction.pages.dev?ref=" + profile.referralCode;
-    const text = "I am predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion 🎯";
-    
-   
-    const shareUrl = "https://warpcast.com/~/compose?embeds[]=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text);
-    
+    const text = "I am predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion";
+    const shareUrl = "https://warpcast.com/~/compose?text=" + encodeURIComponent(text) + "&embeds[]=" + encodeURIComponent(link);
     try {
       sdk.actions.openUrl(shareUrl);
     } catch (e) {
@@ -327,7 +324,7 @@ export default function App() {
     } catch {}
   }
 
- async function loadProfile() {
+  async function loadProfile() {
     setLoadingProfile(true);
     try {
       await fetch(`${API}/api/user`, {
@@ -339,37 +336,6 @@ export default function App() {
       const d = await r.json();
       if (!d.error) setProfile(d);
     } catch {}
-    setLoadingProfile(false);
-  }
-
-      
-      const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
-      const d = await r.json();
-      if (!d.error) setProfile(d);
-    } catch (error) {
-      console.error("Error loading profile:", error);
-    }
-    setLoadingProfile(false);
-  }
-
-     
-      const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
-      const d = await r.json();
-      if (!d.error) setProfile(d);
-    } catch (error) {
-      console.error("Error loading profile:", error);
-    }
-    setLoadingProfile(false);
-  }
-
-
-
-      const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
-      const d = await r.json();
-      if (!d.error) setProfile(d);
-    } catch (error) {
-      console.error("Error loading profile:", error);
-    }
     setLoadingProfile(false);
   }
 
