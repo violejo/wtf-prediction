@@ -47,6 +47,10 @@ interface Profile {
 }
 
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
+const CONTRACT_ADDRESS = "0x780DF9609F84e16Dc75f4c36D30855F01d91941F";
+const BASE_CHAIN_ID_HEX = "0x2105";
+const SEL_RECORD_PREDICTION = "ba6298b5";
+const SEL_RECORD_SPIN = "38924d2e";
 
 const NEON_CYAN = "#00f5ff";
 const NEON_PURPLE = "#bf00ff";
@@ -55,6 +59,93 @@ const NEON_PINK = "#ff006e";
 const BG_DARK = "#050510";
 const BG_CARD = "#0a0a1a";
 const BG_CARD2 = "#0d0d20";
+
+function toHex32(n: number): string {
+  return n.toString(16).padStart(64, "0");
+}
+
+function strToHex(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let hex = "";
+  for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+  return hex;
+}
+
+function encodeStringTail(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  const lenHex = toHex32(bytes.length);
+  let dataHex = strToHex(str);
+  const padLen = Math.ceil(bytes.length / 32) * 32;
+  dataHex = dataHex.padEnd(padLen * 2, "0");
+  return lenHex + dataHex;
+}
+
+function encodeRecordPrediction(gameId: string, pick: string): string {
+  const offsetA = 64;
+  const tailA = encodeStringTail(gameId);
+  const offsetB = offsetA + tailA.length / 2;
+  const tailB = encodeStringTail(pick);
+  return "0x" + SEL_RECORD_PREDICTION + toHex32(offsetA) + toHex32(offsetB) + tailA + tailB;
+}
+
+async function getEthProvider(): Promise<any> {
+  try {
+    const provider = await sdk.wallet.ethProvider;
+    return provider || null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureBaseNetwork(provider: any): Promise<boolean> {
+  try {
+    const chainId = await provider.request({ method: "eth_chainId" });
+    if (chainId === BASE_CHAIN_ID_HEX) return true;
+    await provider.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
+    });
+    return true;
+  } catch {
+    try {
+      await provider.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: BASE_CHAIN_ID_HEX,
+          chainName: "Base",
+          nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+          rpcUrls: ["https://mainnet.base.org"],
+          blockExplorerUrls: ["https://basescan.org"],
+        }],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+async function sendRecordTx(data: string): Promise<{ ok: boolean; error?: string }> {
+  const provider = await getEthProvider();
+  if (!provider) return { ok: false, error: "no_wallet" };
+  try {
+    const netOk = await ensureBaseNetwork(provider);
+    if (!netOk) return { ok: false, error: "wrong_network" };
+    const accounts: string[] = await provider.request({ method: "eth_requestAccounts" });
+    if (!accounts || !accounts.length) return { ok: false, error: "no_account" };
+    const txHash = await provider.request({
+      method: "eth_sendTransaction",
+      params: [{
+        from: accounts[0],
+        to: CONTRACT_ADDRESS,
+        data,
+      }],
+    });
+    return { ok: !!txHash };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || "tx_failed" };
+  }
+}
 
 function getUserId(): string {
   let id = localStorage.getItem("wtf_uid");
@@ -125,6 +216,8 @@ export default function App() {
   const [countdown, setCountdown] = useState(secsToUTCMidnight());
   const [showPredHistory, setShowPredHistory] = useState(false);
   const [animatedCards, setAnimatedCards] = useState<Set<string>>(new Set());
+  const [txPending, setTxPending] = useState(false);
+  const [txError, setTxError] = useState("");
 
   useEffect(() => {
     const t = setInterval(() => setCountdown(secsToUTCMidnight()), 1000);
@@ -249,6 +342,25 @@ export default function App() {
   async function submitPick(gameId: string, pick: Pick) {
     if (submitting) return;
     setSubmitting(gameId);
+    setTxError("");
+
+    setTxPending(true);
+    const txData = encodeRecordPrediction(gameId, pick);
+    const txResult = await sendRecordTx(txData);
+    setTxPending(false);
+
+    if (!txResult.ok) {
+      setTxError(
+        txResult.error === "no_wallet"
+          ? "Wallet not available. Open this app inside Farcaster/Warpcast."
+          : txResult.error === "wrong_network"
+          ? "Please switch to Base network."
+          : "Transaction was not confirmed. Prediction not submitted."
+      );
+      setSubmitting(null);
+      return;
+    }
+
     try {
       const r = await fetch(`${API}/api/predict`, {
         method: "POST",
@@ -286,6 +398,24 @@ export default function App() {
     setSpinning(true);
     setSpinResult(null);
     setSpinErr("");
+    setTxError("");
+
+    setTxPending(true);
+    const txResult = await sendRecordTx("0x" + SEL_RECORD_SPIN);
+    setTxPending(false);
+
+    if (!txResult.ok) {
+      setSpinErr(
+        txResult.error === "no_wallet"
+          ? "Wallet not available. Open this app inside Farcaster/Warpcast."
+          : txResult.error === "wrong_network"
+          ? "Please switch to Base network."
+          : "Transaction was not confirmed. Spin cancelled."
+      );
+      setSpinning(false);
+      return;
+    }
+
     try {
       const r = await fetch(`${API}/api/spin`, {
         method: "POST",
@@ -365,7 +495,7 @@ export default function App() {
         <p style={sx.time}>🕐 {fmtDate(g.kickoff)}</p>
         {showPicks && (
           isLoading ? (
-            <p style={sx.loading}>⏳ Submitting...</p>
+            <p style={sx.loading}>{txPending ? "⛓ Confirming on Base..." : "⏳ Submitting..."}</p>
           ) : myPick ? (
             <p style={sx.picked}>✅ {pickLabel(myPick, g.homeTeam, g.awayTeam)}</p>
           ) : !started ? (
@@ -387,7 +517,8 @@ export default function App() {
                   {g.awayFlag} {g.awayTeam}
                 </button>
               </div>
-              <p style={sx.hint}>✨ Correct = 2,500 WTF</p>
+              <p style={sx.hint}>✨ Correct = 2,500 WTF · ⛓ Recorded on Base</p>
+              {txError && submitting === null && <p style={sx.err}>{txError}</p>}
             </>
           ) : (
             <p style={{ ...sx.hint, color: "#444" }}>⏸ Predictions closed</p>
@@ -486,7 +617,7 @@ export default function App() {
             disabled={!profile.canSpinToday || spinning}
             onClick={doSpin}
           >
-            {spinning ? "Spinning..." : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
+            {spinning ? (txPending ? "⛓ Confirming on Base..." : "Spinning...") : profile.canSpinToday ? "🎰 Spin Now!" : "⏰ Come back tomorrow"}
           </button>
           {!profile.canSpinToday && (
             <p style={sx.timer}>
