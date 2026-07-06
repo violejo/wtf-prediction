@@ -330,15 +330,27 @@ export default function App() {
   async function loadProfile() {
     setLoadingProfile(true);
     try {
+     
+      const context = await sdk.context;
+      const wallet = context?.user?.custodyAddress || null;
+
+      
       await fetch(`${API}/api/user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: UID.current }),
+        body: JSON.stringify({ 
+          userId: UID.current, 
+          walletAddress: wallet 
+        }),
       });
+
+
       const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
       const d = await r.json();
       if (!d.error) setProfile(d);
-    } catch {}
+    } catch (error) {
+      console.error("Error loading profile:", error);
+    }
     setLoadingProfile(false);
   }
 
