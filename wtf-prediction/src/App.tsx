@@ -330,12 +330,31 @@ export default function App() {
   async function loadProfile() {
     setLoadingProfile(true);
     try {
-       
+      // ۱. دریافت کانتکست فارکستر
+      const context = await sdk.context;
+      
+      // 🛠 استفاده از (as any) برای دور زدن سخت‌گیری تایپ‌اسکریپت و حل خطای بیلد
+      const wallet = (context?.user as any)?.custodyAddress || null;
+
+      // ۲. ارسال ایدی و آدرس والت به ورکر
       await fetch(`${API}/api/user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: UID.current }),
+        body: JSON.stringify({ 
+          userId: UID.current, 
+          walletAddress: wallet 
+        }),
       });
+
+      
+      const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
+      const d = await r.json();
+      if (!d.error) setProfile(d);
+    } catch (error) {
+      console.error("Error loading profile:", error);
+    }
+    setLoadingProfile(false);
+  }
 
      
       const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
