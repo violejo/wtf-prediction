@@ -247,8 +247,11 @@ export default function App() {
   function shareReferral() {
     if (!profile) return;
     const link = "https://wtf-prediction.pages.dev?ref=" + profile.referralCode;
-    const text = "I am predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion";
-    const shareUrl = "https://warpcast.com/~/compose?text=" + encodeURIComponent(text) + "&embeds[]=" + encodeURIComponent(link);
+    const text = "I am predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion 🎯";
+    
+    
+    const shareUrl = "https://warpcast.com/~/compose?embeds[]=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text);
+    
     try {
       sdk.actions.openUrl(shareUrl);
     } catch (e) {
