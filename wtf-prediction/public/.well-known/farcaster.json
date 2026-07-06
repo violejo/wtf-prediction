@@ -1,1 +1,17 @@
-
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjQ0NDM2MCwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDE0OEVkZjY2QzhCYzVBMTdjMzFEREVGMDY0ODlmMTg2YzNlQkI0MjIifQ",
+    "payload": "eyJkb21haW4iOiJ3dGYtcHJlZGljdGlvbi5wYWdlcy5kZXYifQ",
+    "signature": "Bv6NDFW76ykqJCvIF3c6w71RdBCG+dtNdci/KK+66OorRjn6yFfrT67v4Ct9RzY/Q4y/k48JqSzWG0e5IpGrYRw="
+  },
+  "frame": {
+    "version": "1",
+    "name": "WTF World Cup",
+    "iconUrl": "https://wtf-prediction.pages.dev/icon.png",
+    "homeUrl": "https://wtf-prediction.pages.dev",
+    "iconUrl": "https://wtf-prediction.pages.dev/icon.png",
+    "buttonTitle": "🎯 Predict Now",
+    "splashImageUrl": "https://wtf-prediction.pages.dev/splash.png",
+    "splashBackgroundColor": "#050510"
+  }
+}
