@@ -330,15 +330,20 @@ export default function App() {
   async function loadProfile() {
     setLoadingProfile(true);
     try {
+       
       await fetch(`${API}/api/user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: UID.current }),
       });
+
+     
       const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
       const d = await r.json();
       if (!d.error) setProfile(d);
-    } catch {}
+    } catch (error) {
+      console.error("Error loading profile:", error);
+    }
     setLoadingProfile(false);
   }
 
