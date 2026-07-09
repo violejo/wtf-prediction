@@ -4,7 +4,8 @@ import BracketView from "./BracketView";
 import type { SpinWheelRef } from "./SpinWheel";
 import { sdk } from "@farcaster/miniapp-sdk";
 
-type Tab = "home" | "predict" | "bracket" | "profile";
+type Tab = "home" | "predict" | "profile";
+type MenuPage = "bracket" | "quests" | null;
 type Pick = "home" | "draw" | "away";
 
 interface Game {
@@ -44,6 +45,17 @@ interface Profile {
   referralEarnings: number;
   canSpinToday: boolean;
   predHistory: PredEntry[];
+}
+
+interface Quest {
+  id: string;
+  type: "follow" | "action" | "daily_share";
+  label: string;
+  description: string;
+  points: number;
+  profileUrl?: string;
+  castUrl?: string;
+  status: "available" | "pending" | "claimed";
 }
 
 const API = "https://withered-snow-677a.alinikoonahad.workers.dev";
@@ -135,11 +147,7 @@ async function sendRecordTx(data: string): Promise<{ ok: boolean; error?: string
     if (!accounts || !accounts.length) return { ok: false, error: "no_account" };
     const txHash = await provider.request({
       method: "eth_sendTransaction",
-      params: [{
-        from: accounts[0],
-        to: CONTRACT_ADDRESS,
-        data,
-      }],
+      params: [{ from: accounts[0], to: CONTRACT_ADDRESS, data }],
     });
     return { ok: !!txHash };
   } catch (e: any) {
@@ -154,6 +162,20 @@ function getUserId(): string {
     localStorage.setItem("wtf_uid", id);
   }
   return id;
+}
+
+function getRefCodeFromUrl(): string | null {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get("ref");
+    if (ref) {
+      localStorage.setItem("wtf_ref", ref);
+      return ref;
+    }
+    return localStorage.getItem("wtf_ref");
+  } catch {
+    return null;
+  }
 }
 
 function secsToUTCMidnight(): number {
@@ -198,17 +220,21 @@ function pickLabel(pick: string, home: string, away: string): string {
 
 export default function App() {
   const UID = useRef(getUserId());
-  const [, setFcUser] = useState<{ fid: number; username?: string } | null>(null);
   const wheelRef = useRef<SpinWheelRef>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tab, setTab] = useState<Tab>("home");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPage, setMenuPage] = useState<MenuPage>(null);
   const [games, setGames] = useState<Game[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [preds, setPreds] = useState<Record<string, Pick>>({});
   const [bracket, setBracket] = useState<Record<string, Record<string, string>>>({});
+  const [quests, setQuests] = useState<Quest[]>([]);
   const [loadingGames, setLoadingGames] = useState(false);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [loadingQuests, setLoadingQuests] = useState(false);
   const [submitting, setSubmitting] = useState<string | null>(null);
+  const [questBusy, setQuestBusy] = useState<string | null>(null);
   const [spinResult, setSpinResult] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
   const [spinErr, setSpinErr] = useState("");
@@ -226,35 +252,34 @@ export default function App() {
 
   useEffect(() => {
     loadGames();
-    loadPreds();
-    initFarcaster();
+    (async () => {
+      await initFarcaster();
+      await loadPreds();
+      await loadProfile();
+    })();
   }, []);
 
   async function initFarcaster() {
     try {
       const context = await sdk.context;
       if (context && context.user && context.user.fid) {
-        setFcUser({ fid: context.user.fid, username: context.user.username });
         localStorage.setItem("wtf_uid", "fid_" + context.user.fid);
         UID.current = "fid_" + context.user.fid;
       }
       await sdk.actions.ready();
-    } catch (e) {
-      console.log("Not in Farcaster context, using local ID");
-    }
+    } catch {}
   }
 
   function shareReferral() {
     if (!profile) return;
     const link = "https://wtf-prediction.pages.dev?ref=" + profile.referralCode;
-    const text = "I am predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion 🎯";
-    
-    
-    const shareUrl = "https://warpcast.com/~/compose?embeds[]=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text);
-    
+    const text =
+      "⚽ I'm predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion 🏆\n\n#WTF #WorldCup2026 #Farcaster #Base #OnchainPrediction";
+    const shareUrl =
+      "https://warpcast.com/~/compose?embeds[]=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text);
     try {
       sdk.actions.openUrl(shareUrl);
-    } catch (e) {
+    } catch {
       window.open(shareUrl, "_blank");
     }
   }
@@ -327,13 +352,27 @@ export default function App() {
     } catch {}
   }
 
+  async function loadQuests() {
+    setLoadingQuests(true);
+    try {
+      const r = await fetch(`${API}/api/quests?userId=${UID.current}`);
+      const d = await r.json();
+      if (Array.isArray(d)) setQuests(d);
+    } catch {}
+    setLoadingQuests(false);
+  }
+
   async function loadProfile() {
     setLoadingProfile(true);
     try {
+      const refCode = getRefCodeFromUrl();
       await fetch(`${API}/api/user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: UID.current }),
+        body: JSON.stringify({
+          userId: UID.current,
+          referredByCode: refCode || undefined,
+        }),
       });
       const r = await fetch(`${API}/api/profile?userId=${UID.current}`);
       const d = await r.json();
@@ -346,12 +385,10 @@ export default function App() {
     if (submitting) return;
     setSubmitting(gameId);
     setTxError("");
-
     setTxPending(true);
     const txData = encodeRecordPrediction(gameId, pick);
     const txResult = await sendRecordTx(txData);
     setTxPending(false);
-
     if (!txResult.ok) {
       setTxError(
         txResult.error === "no_wallet"
@@ -363,7 +400,6 @@ export default function App() {
       setSubmitting(null);
       return;
     }
-
     try {
       const r = await fetch(`${API}/api/predict`, {
         method: "POST",
@@ -385,10 +421,7 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId: UID.current, stage, gameId, pick: teamName }),
       });
-      setBracket((prev) => ({
-        ...prev,
-        [stage]: { ...(prev[stage] || {}), [gameId]: teamName },
-      }));
+      setBracket((prev) => ({ ...prev, [stage]: { ...(prev[stage] || {}), [gameId]: teamName } }));
     } catch {}
   }
 
@@ -402,11 +435,9 @@ export default function App() {
     setSpinResult(null);
     setSpinErr("");
     setTxError("");
-
     setTxPending(true);
     const txResult = await sendRecordTx("0x" + SEL_RECORD_SPIN);
     setTxPending(false);
-
     if (!txResult.ok) {
       setSpinErr(
         txResult.error === "no_wallet"
@@ -418,7 +449,6 @@ export default function App() {
       setSpinning(false);
       return;
     }
-
     try {
       const r = await fetch(`${API}/api/spin`, {
         method: "POST",
@@ -453,15 +483,99 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  async function handleFollowQuest(quest: Quest) {
+    if (questBusy) return;
+    setQuestBusy(quest.id);
+    try {
+      if (quest.profileUrl) {
+        try {
+          sdk.actions.openUrl(quest.profileUrl);
+        } catch {
+          window.open(quest.profileUrl, "_blank");
+        }
+      }
+      const r = await fetch(`${API}/api/quest/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: UID.current, questId: quest.id }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setQuests((prev) => prev.map((q) => (q.id === quest.id ? { ...q, status: "pending" } : q)));
+      }
+    } catch {}
+    setQuestBusy(null);
+  }
+
+  async function handleActionQuest(quest: Quest) {
+    if (questBusy) return;
+    setQuestBusy(quest.id);
+    try {
+      if (quest.castUrl) {
+        try {
+          sdk.actions.openUrl(quest.castUrl);
+        } catch {
+          window.open(quest.castUrl, "_blank");
+        }
+      }
+      const r = await fetch(`${API}/api/quest/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: UID.current, questId: quest.id }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setQuests((prev) => prev.map((q) => (q.id === quest.id ? { ...q, status: "claimed" } : q)));
+        await loadProfile();
+      }
+    } catch {}
+    setQuestBusy(null);
+  }
+
+  async function handleDailyShareQuest(quest: Quest) {
+    if (questBusy || !profile) return;
+    setQuestBusy(quest.id);
+    try {
+      const link = "https://wtf-prediction.pages.dev?ref=" + profile.referralCode;
+      const text =
+        "⚽ I'm predicting World Cup 2026 matches on WTF Prediction and earning points! Join me and predict the champion 🏆\n\n#WTF #WorldCup2026 #Farcaster #Base #OnchainPrediction";
+      const shareUrl =
+        "https://warpcast.com/~/compose?embeds[]=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text);
+      try {
+        sdk.actions.openUrl(shareUrl);
+      } catch {
+        window.open(shareUrl, "_blank");
+      }
+      const r = await fetch(`${API}/api/quest/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: UID.current, questId: quest.id }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setQuests((prev) => prev.map((q) => (q.id === quest.id ? { ...q, status: "claimed" } : q)));
+        await loadProfile();
+      }
+    } catch {}
+    setQuestBusy(null);
+  }
+
   function switchTab(t: Tab) {
     setTab(t);
+    setMenuPage(null);
     setSpinResult(null);
     setSpinErr("");
     setShowPredHistory(false);
     if (t === "home") { loadGames(); loadPreds(); }
     if (t === "predict") { if (games.length === 0) loadGames(); loadPreds(); }
-    if (t === "bracket") { if (games.length === 0) loadGames(); loadBracket(); }
     if (t === "profile") loadProfile();
+  }
+
+  function openMenuPage(p: MenuPage) {
+    setMenuPage(p);
+    setMenuOpen(false);
+    if (p === "bracket") { if (games.length === 0) loadGames(); loadBracket(); }
+    if (p === "quests") loadQuests();
   }
 
   const liveGames = games.filter((g) => g.status === "live" && g.teamsKnown);
@@ -577,9 +691,45 @@ export default function App() {
     return <div style={sx.list}>{predictable.map((g) => <GameCard key={g.gameId} g={g} showPicks={true} />)}</div>;
   }
 
-  function renderBracket() {
+  function renderBracketPage() {
     if (loadingGames) return <p style={sx.center}>Loading bracket...</p>;
     return <BracketView games={games} bracket={bracket} onPick={handleBracketPick} />;
+  }
+
+  function renderQuestsPage() {
+    if (loadingQuests) return <p style={sx.center}>Loading quests...</p>;
+    if (quests.length === 0) return <p style={sx.center}>No quests available right now.</p>;
+    return (
+      <div style={sx.list}>
+        {quests.map((q) => {
+          const busy = questBusy === q.id;
+          return (
+            <div key={q.id} style={sx.box}>
+              <p style={sx.boxT}>{q.label}</p>
+              <p style={sx.boxS}>{q.description}</p>
+              <p style={{ ...sx.boxS, color: NEON_GREEN, fontWeight: "bold" }}>+{q.points.toLocaleString()} WTF</p>
+              {q.status === "claimed" ? (
+                <p style={sx.ok}>{q.type === "daily_share" ? "✅ Claimed today" : "✅ Claimed"}</p>
+              ) : q.status === "pending" ? (
+                <p style={sx.loading}>⏳ Verifying... this may take a few minutes</p>
+              ) : q.type === "follow" ? (
+                <button style={sx.spinBtn} disabled={busy} onClick={() => handleFollowQuest(q)}>
+                  {busy ? "Opening..." : "Follow"}
+                </button>
+              ) : q.type === "daily_share" ? (
+                <button style={sx.spinBtn} disabled={busy} onClick={() => handleDailyShareQuest(q)}>
+                  {busy ? "Opening..." : "Share"}
+                </button>
+              ) : (
+                <button style={sx.spinBtn} disabled={busy} onClick={() => handleActionQuest(q)}>
+                  {busy ? "Opening..." : "Like & Recast"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   function renderProfile() {
@@ -676,6 +826,8 @@ export default function App() {
     );
   }
 
+  const showingMenuPage = menuPage !== null;
+
   return (
     <div style={sx.root}>
       <div style={sx.headerWrap}>
@@ -685,23 +837,44 @@ export default function App() {
             <span style={sx.hTitle}>⚽ WTF Prediction</span>
             <span style={sx.hBadge}>WORLD CUP 2026</span>
           </div>
-          <div style={sx.hGlow} />
+          <div style={sx.headerRight}>
+            <div style={sx.hGlow} />
+            <button style={sx.menuBtn} onClick={() => setMenuOpen(!menuOpen)}>☰</button>
+          </div>
         </div>
+        {menuOpen && (
+          <div style={sx.dropdown}>
+            <button style={sx.dropdownItem} onClick={() => openMenuPage("bracket")}>🏆 Champion Bracket</button>
+            <button style={sx.dropdownItem} onClick={() => openMenuPage("quests")}>📋 Quests</button>
+          </div>
+        )}
       </div>
       <div style={sx.content}>
-        {tab === "home" && renderHome()}
-        {tab === "predict" && renderPredict()}
-        {tab === "bracket" && renderBracket()}
-        {tab === "profile" && renderProfile()}
+        {showingMenuPage ? (
+          <>
+            <button style={sx.backBtn} onClick={() => setMenuPage(null)}>← Back</button>
+            {menuPage === "bracket" && renderBracketPage()}
+            {menuPage === "quests" && renderQuestsPage()}
+          </>
+        ) : (
+          <>
+            {tab === "home" && renderHome()}
+            {tab === "predict" && renderPredict()}
+            {tab === "profile" && renderProfile()}
+          </>
+        )}
       </div>
       <div style={sx.nav}>
         {([
           { key: "home", icon: "🏠", label: "Home" },
           { key: "predict", icon: "🎯", label: "Predict" },
-          { key: "bracket", icon: "🏆", label: "Bracket" },
           { key: "profile", icon: "👤", label: "Profile" },
         ] as { key: Tab; icon: string; label: string }[]).map((t) => (
-          <button key={t.key} style={{ ...sx.navBtn, ...(tab === t.key ? sx.navOn : {}) }} onClick={() => switchTab(t.key)}>
+          <button
+            key={t.key}
+            style={{ ...sx.navBtn, ...(tab === t.key && !showingMenuPage ? sx.navOn : {}) }}
+            onClick={() => switchTab(t.key)}
+          >
             {t.icon}<br />
             <span style={sx.navL}>{t.label}</span>
           </button>
@@ -713,12 +886,17 @@ export default function App() {
 
 const sx: Record<string, React.CSSProperties> = {
   root: { fontFamily: "'Inter','Courier New',monospace", background: BG_DARK, color: "#e0e0ff", minHeight: "100vh", display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" },
-  headerWrap: { position: "relative", height: 72, overflow: "hidden", flexShrink: 0 },
-  canvas: { position: "absolute", inset: 0, width: "100%", height: "100%" },
-  header: { position: "relative", zIndex: 2, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${NEON_CYAN}33` },
+  headerWrap: { position: "relative", overflow: "visible", flexShrink: 0 },
+  canvas: { position: "absolute", inset: 0, width: "100%", height: 72 },
+  header: { position: "relative", zIndex: 2, height: 72, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: `1px solid ${NEON_CYAN}33` },
+  headerRight: { display: "flex", alignItems: "center", gap: 12 },
   hTitle: { fontSize: 17, fontWeight: "bold", color: NEON_CYAN, textShadow: `0 0 12px ${NEON_CYAN}`, letterSpacing: 1 },
   hBadge: { display: "block", fontSize: 9, color: NEON_PURPLE, letterSpacing: 3, marginTop: 2, textShadow: `0 0 8px ${NEON_PURPLE}` },
   hGlow: { width: 8, height: 8, borderRadius: "50%", background: NEON_GREEN, boxShadow: `0 0 10px ${NEON_GREEN}` },
+  menuBtn: { background: "none", border: `1px solid ${NEON_CYAN}33`, color: NEON_CYAN, fontSize: 18, width: 36, height: 36, borderRadius: 8, cursor: "pointer" },
+  dropdown: { position: "absolute", top: 72, right: 16, zIndex: 10, background: BG_CARD, border: `1px solid ${NEON_CYAN}33`, borderRadius: 12, overflow: "hidden", boxShadow: `0 0 20px ${NEON_CYAN}22`, display: "flex", flexDirection: "column", minWidth: 200 },
+  dropdownItem: { background: "none", border: "none", color: "#c0c0e0", padding: "12px 16px", textAlign: "left", cursor: "pointer", fontSize: 13, borderBottom: `1px solid ${NEON_CYAN}11` },
+  backBtn: { background: "none", border: `1px solid ${NEON_CYAN}22`, color: NEON_CYAN, borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 12, marginBottom: 12 },
   content: { flex: 1, overflowY: "auto", padding: "12px 16px 90px" },
   nav: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#08081899", backdropFilter: "blur(12px)", borderTop: `1px solid ${NEON_CYAN}22`, display: "flex", justifyContent: "space-around", padding: "8px 0" },
   navBtn: { background: "none", border: "none", color: "#444", fontSize: 20, cursor: "pointer", padding: "4px 12px", borderRadius: 8, textAlign: "center" },
